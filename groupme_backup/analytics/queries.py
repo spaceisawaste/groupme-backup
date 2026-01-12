@@ -892,29 +892,55 @@ def get_mention_interaction_matrix(
 
 
 def get_reply_patterns(
-    session: Session, group_id: str, time_window: int = 5, limit: int = 20
+    session: Session,
+    group_id: str,
+    days: int = 30,
+    time_window: int = 5,
+    limit: int = 20,
 ) -> List[Dict[str, Any]]:
-    """Detect reply patterns (who responds to whom within time window in minutes)."""
+    """
+    Detect reply patterns (who responds to whom within time window).
+
+    Args:
+        session: Database session
+        group_id: Group ID to analyze
+        days: Number of days to look back (default 30, prevents expensive queries)
+        time_window: Minutes between messages to consider a reply (default 5)
+        limit: Maximum results to return
+
+    Returns:
+        List of reply patterns with counts and average response times
+    """
+    # Use Python datetime to calculate cutoff
+    from datetime import datetime, timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
     sql = text("""
-    WITH message_pairs AS (
-        SELECT 
+    WITH recent_messages AS (
+        SELECT
+            user_id,
+            created_at
+        FROM messages
+        WHERE group_id = :group_id
+          AND system = FALSE
+          AND created_at >= :cutoff
+    ),
+    message_pairs AS (
+        SELECT
             m1.user_id AS first_user_id,
-            m1.name AS first_user_name,
+            u1.name AS first_user_name,
             m2.user_id AS second_user_id,
-            m2.name AS second_user_name,
-            m1.created_at AS first_time,
-            m2.created_at AS second_time,
+            u2.name AS second_user_name,
             EXTRACT(EPOCH FROM (m2.created_at - m1.created_at)) / 60 AS gap_minutes
-        FROM messages m1
-        JOIN messages m2 ON m1.group_id = m2.group_id
-        WHERE m1.group_id = :group_id
-          AND m1.system = FALSE
-          AND m2.system = FALSE
-          AND m1.user_id != m2.user_id
+        FROM recent_messages m1
+        JOIN recent_messages m2
+          ON m1.user_id != m2.user_id
           AND m2.created_at > m1.created_at
           AND EXTRACT(EPOCH FROM (m2.created_at - m1.created_at)) / 60 <= :time_window
+        JOIN users u1 ON m1.user_id = u1.id
+        JOIN users u2 ON m2.user_id = u2.id
     )
-    SELECT 
+    SELECT
         first_user_id,
         first_user_name,
         second_user_id,
@@ -930,6 +956,7 @@ def get_reply_patterns(
     results = []
     for row in session.execute(sql, {
         "group_id": group_id,
+        "cutoff": cutoff,
         "time_window": time_window,
         "limit": limit
     }):

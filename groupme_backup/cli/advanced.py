@@ -474,21 +474,25 @@ def who_mentions_who(ctx: click.Context, group_identifier: str, limit: int) -> N
 
 @cli.command()
 @click.argument("group_identifier")
-@click.option("--window", default=5, help="Time window in minutes")
+@click.option("--days", default=30, help="Number of days to analyze (default 30)")
+@click.option("--window", default=5, help="Time window in minutes for replies")
 @click.option("--limit", default=20, help="Number of patterns to show")
 @click.pass_context
-def reply_patterns(ctx: click.Context, group_identifier: str, window: int, limit: int) -> None:
+def reply_patterns(ctx: click.Context, group_identifier: str, days: int, window: int, limit: int) -> None:
     """Show who responds to whom most often.
 
-    Example: groupme-backup reply-patterns 1 --window 5
+    Analyzes recent messages to find reply patterns. Limited to recent days
+    for performance on large datasets.
+
+    Example: groupme-backup reply-patterns 1 --days 30 --window 5
     """
     group_id = parse_group_identifier(group_identifier)
 
     with get_session() as session:
-        results = queries.get_reply_patterns(session, group_id, window, limit)
+        results = queries.get_reply_patterns(session, group_id, days, window, limit)
 
         if results:
-            table = Table(title=f"Reply Patterns (within {window} minutes)")
+            table = Table(title=f"Reply Patterns (Last {days} Days, within {window}min)")
             table.add_column("First User", style="green")
             table.add_column("→", style="dim")
             table.add_column("Responder", style="cyan")
