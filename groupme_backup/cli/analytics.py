@@ -558,3 +558,72 @@ def all_aliases(ctx: click.Context, group_identifier: str, min_aliases: int, lim
         console.print(table)
         console.print(f"\n[dim]Use 'groupme-backup aliases {group_identifier} --user <name>' to see details[/dim]")
         console.print()
+
+
+@cli.command("by-name")
+@click.argument("group_identifier")
+@click.option("--user", required=True, help="Current username to search for")
+@click.option("--name", "historical_name", required=True, help="Historical name/alias to filter by")
+@click.option("--limit", default=50, help="Maximum messages to show")
+@click.pass_context
+def by_name(
+    ctx: click.Context,
+    group_identifier: str,
+    user: str,
+    historical_name: str,
+    limit: int,
+) -> None:
+    """Show messages sent under a specific name.
+
+    This shows messages from a particular "era" of a user's naming history.
+
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
+
+    Examples:
+        groupme-backup by-name 1 --user "Calm" --name "Certified Boy Lover"
+        groupme-backup by-name 1 --user "Chickity" --name "The Goopster"
+    """
+    group_id = parse_group_identifier(group_identifier)
+
+    with get_session() as session:
+        result = queries.get_messages_by_name(
+            session, group_id, user, historical_name, limit
+        )
+
+        if "error" in result:
+            console.print(f"[red]Error:[/red] {result['error']}")
+            return
+
+        console.print(f"\n[bold]{result['current_name']}[/bold]")
+        console.print(f"Historical name: [green]{result['historical_name']}[/green]")
+        console.print(
+            f"Period: {result['date_range']['first'].strftime('%Y-%m-%d')} to "
+            f"{result['date_range']['last'].strftime('%Y-%m-%d')}"
+        )
+        console.print(f"Messages during this period: [cyan]{result['message_count']}[/cyan]\n")
+
+        table = Table(title=f"Messages as '{result['historical_name']}'")
+        table.add_column("#", style="dim", justify="right", width=4)
+        table.add_column("Date", style="dim", width=16)
+        table.add_column("Message", style="white")
+        table.add_column("Likes", style="magenta", justify="right", width=6)
+
+        for i, msg in enumerate(result["messages"], 1):
+            text_preview = msg["text"][:80]
+            if len(msg["text"]) > 80:
+                text_preview += "..."
+
+            table.add_row(
+                str(i),
+                msg["created_at"].strftime("%Y-%m-%d %H:%M"),
+                text_preview,
+                str(msg["like_count"]),
+            )
+
+        console.print(table)
+        console.print()
+
+        if result["message_count"] == limit:
+            console.print(
+                f"[dim]Showing first {limit} results. Use --limit to see more.[/dim]"
+            )

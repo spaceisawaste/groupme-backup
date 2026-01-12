@@ -1410,3 +1410,79 @@ def get_all_users_with_aliases(
         })
 
     return users
+
+
+def get_messages_by_name(
+    session: Session,
+    group_id: str,
+    user_search: str,
+    name_search: str,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """
+    Get messages sent when a user had a specific display name.
+
+    Args:
+        session: Database session
+        group_id: Group ID
+        user_search: Partial current name to find the user
+        name_search: Partial historical name to search for
+        limit: Maximum messages to return
+
+    Returns:
+        Dictionary with user info and messages from that naming period
+    """
+    # Find user by current name
+    user = (
+        session.query(User)
+        .join(Message, User.id == Message.user_id)
+        .filter(Message.group_id == group_id)
+        .filter(User.name.ilike(f"%{user_search}%"))
+        .first()
+    )
+
+    if not user:
+        return {"error": f"No user found matching '{user_search}'"}
+
+    # Find messages sent under the specific name
+    messages = (
+        session.query(Message)
+        .filter(Message.group_id == group_id)
+        .filter(Message.user_id == user.id)
+        .filter(Message.name.ilike(f"%{name_search}%"))
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    if not messages:
+        return {
+            "error": f"No messages found for user '{user.name}' with name matching '{name_search}'"
+        }
+
+    # Get stats for this name period
+    first_msg = messages[-1]
+    last_msg = messages[0]
+    exact_name = first_msg.name
+
+    results = {
+        "user_id": user.id,
+        "current_name": user.name,
+        "historical_name": exact_name,
+        "message_count": len(messages),
+        "date_range": {
+            "first": first_msg.created_at,
+            "last": last_msg.created_at,
+        },
+        "messages": [],
+    }
+
+    for msg in messages:
+        results["messages"].append({
+            "message_id": msg.id,
+            "text": format_message_with_attachments(msg.text, msg.attachments),
+            "created_at": msg.created_at,
+            "like_count": len(msg.favorites),
+        })
+
+    return results
