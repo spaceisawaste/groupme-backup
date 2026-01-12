@@ -575,19 +575,20 @@ def get_like_to_message_ratio(
     """Get users with best like-to-message ratio."""
     sql = text("""
     WITH user_stats AS (
-        SELECT 
+        SELECT
             m.user_id,
-            m.name,
+            u.name,
             COUNT(DISTINCT m.id) AS message_count,
             COUNT(DISTINCT mf.message_id) AS messages_with_likes,
             COUNT(mf.user_id) AS total_likes
         FROM messages m
+        JOIN users u ON m.user_id = u.id
         LEFT JOIN message_favorites mf ON m.id = mf.message_id
         WHERE m.group_id = :group_id AND m.system = FALSE
-        GROUP BY m.user_id, m.name
+        GROUP BY m.user_id, u.name
         HAVING COUNT(DISTINCT m.id) >= 10  -- At least 10 messages
     )
-    SELECT 
+    SELECT
         user_id,
         name,
         message_count,
@@ -648,22 +649,22 @@ def get_conversation_starters(
     """Find who starts conversations after long silences (in minutes)."""
     sql = text("""
     WITH message_gaps AS (
-        SELECT 
+        SELECT
             id,
             user_id,
-            name,
             created_at,
             EXTRACT(EPOCH FROM (created_at - LAG(created_at) OVER (ORDER BY created_at))) / 60 AS gap_minutes
         FROM messages
         WHERE group_id = :group_id AND system = FALSE
     )
-    SELECT 
-        user_id,
-        name,
+    SELECT
+        mg.user_id,
+        u.name,
         COUNT(*) AS conversation_starts
-    FROM message_gaps
+    FROM message_gaps mg
+    JOIN users u ON mg.user_id = u.id
     WHERE gap_minutes > :silence_threshold OR gap_minutes IS NULL
-    GROUP BY user_id, name
+    GROUP BY mg.user_id, u.name
     ORDER BY conversation_starts DESC
     LIMIT :limit;
     """)
@@ -953,17 +954,18 @@ def get_night_owl_leaderboard(
 ) -> List[Dict[str, Any]]:
     """Users who post most between midnight and 5 AM."""
     sql = text("""
-    SELECT 
-        user_id,
-        name,
+    SELECT
+        m.user_id,
+        u.name,
         COUNT(*) AS night_messages,
         ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS percentage
-    FROM messages
-    WHERE group_id = :group_id
-      AND system = FALSE
-      AND EXTRACT(HOUR FROM created_at) >= 0
-      AND EXTRACT(HOUR FROM created_at) < 5
-    GROUP BY user_id, name
+    FROM messages m
+    JOIN users u ON m.user_id = u.id
+    WHERE m.group_id = :group_id
+      AND m.system = FALSE
+      AND EXTRACT(HOUR FROM m.created_at) >= 0
+      AND EXTRACT(HOUR FROM m.created_at) < 5
+    GROUP BY m.user_id, u.name
     ORDER BY night_messages DESC
     LIMIT :limit;
     """)
@@ -985,17 +987,18 @@ def get_early_bird_leaderboard(
 ) -> List[Dict[str, Any]]:
     """Users who post most between 5 AM and 9 AM."""
     sql = text("""
-    SELECT 
-        user_id,
-        name,
+    SELECT
+        m.user_id,
+        u.name,
         COUNT(*) AS morning_messages,
         ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS percentage
-    FROM messages
-    WHERE group_id = :group_id
-      AND system = FALSE
-      AND EXTRACT(HOUR FROM created_at) >= 5
-      AND EXTRACT(HOUR FROM created_at) < 9
-    GROUP BY user_id, name
+    FROM messages m
+    JOIN users u ON m.user_id = u.id
+    WHERE m.group_id = :group_id
+      AND m.system = FALSE
+      AND EXTRACT(HOUR FROM m.created_at) >= 5
+      AND EXTRACT(HOUR FROM m.created_at) < 9
+    GROUP BY m.user_id, u.name
     ORDER BY morning_messages DESC
     LIMIT :limit;
     """)
@@ -1018,27 +1021,28 @@ def get_weekend_warrior_leaderboard(
     """Users most active on weekends (Saturday/Sunday)."""
     sql = text("""
     WITH total_messages AS (
-        SELECT user_id, name, COUNT(*) AS total
+        SELECT user_id, COUNT(*) AS total
         FROM messages
         WHERE group_id = :group_id AND system = FALSE
-        GROUP BY user_id, name
+        GROUP BY user_id
     ),
     weekend_messages AS (
-        SELECT user_id, name, COUNT(*) AS weekend
+        SELECT user_id, COUNT(*) AS weekend
         FROM messages
-        WHERE group_id = :group_id 
+        WHERE group_id = :group_id
           AND system = FALSE
           AND EXTRACT(DOW FROM created_at) IN (0, 6)
-        GROUP BY user_id, name
+        GROUP BY user_id
     )
-    SELECT 
+    SELECT
         t.user_id,
-        t.name,
+        u.name,
         w.weekend AS weekend_messages,
         t.total AS total_messages,
         ROUND(100.0 * w.weekend / t.total, 1) AS weekend_percentage
     FROM total_messages t
     JOIN weekend_messages w ON t.user_id = w.user_id
+    JOIN users u ON t.user_id = u.id
     WHERE t.total >= 50  -- At least 50 messages
     ORDER BY weekend_percentage DESC
     LIMIT :limit;
