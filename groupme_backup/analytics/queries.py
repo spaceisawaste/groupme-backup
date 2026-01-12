@@ -1297,3 +1297,111 @@ def get_message_context(
         "target": format_message(target),
         "after": [format_message(msg) for msg in after_messages],
     }
+
+
+def get_user_aliases(
+    session: Session, group_id: str, user_search: str
+) -> Dict[str, Any]:
+    """
+    Get all display names (aliases) a user has used over time.
+
+    Args:
+        session: Database session
+        group_id: Group ID
+        user_search: Partial name to search for (case-insensitive)
+
+    Returns:
+        Dictionary with user info and all aliases with usage stats
+    """
+    # Find user by current name
+    user = (
+        session.query(User)
+        .join(Message, User.id == Message.user_id)
+        .filter(Message.group_id == group_id)
+        .filter(User.name.ilike(f"%{user_search}%"))
+        .first()
+    )
+
+    if not user:
+        return {"error": f"No user found matching '{user_search}'"}
+
+    # Get all names they've used with stats
+    aliases_query = text("""
+        SELECT
+            name,
+            COUNT(*) as message_count,
+            MIN(created_at) as first_used,
+            MAX(created_at) as last_used
+        FROM messages
+        WHERE user_id = :user_id
+        AND group_id = :group_id
+        AND name IS NOT NULL
+        GROUP BY name
+        ORDER BY message_count DESC
+    """)
+
+    result = session.execute(
+        aliases_query, {"user_id": user.id, "group_id": group_id}
+    ).fetchall()
+
+    aliases = []
+    for row in result:
+        aliases.append({
+            "name": row.name,
+            "message_count": row.message_count,
+            "first_used": row.first_used,
+            "last_used": row.last_used,
+        })
+
+    return {
+        "user_id": user.id,
+        "current_name": user.name,
+        "total_aliases": len(aliases),
+        "aliases": aliases,
+    }
+
+
+def get_all_users_with_aliases(
+    session: Session, group_id: str, min_aliases: int = 2
+) -> List[Dict[str, Any]]:
+    """
+    Get all users who have used multiple display names.
+
+    Args:
+        session: Database session
+        group_id: Group ID
+        min_aliases: Minimum number of different names to include
+
+    Returns:
+        List of users with their alias count
+    """
+    query = text("""
+        SELECT
+            m.user_id,
+            u.name as current_name,
+            COUNT(DISTINCT m.name) as alias_count,
+            COUNT(*) as total_messages
+        FROM messages m
+        JOIN users u ON m.user_id = u.id
+        WHERE m.group_id = :group_id
+        AND m.user_id IS NOT NULL
+        AND m.name IS NOT NULL
+        GROUP BY m.user_id, u.name
+        HAVING COUNT(DISTINCT m.name) >= :min_aliases
+        ORDER BY alias_count DESC
+    """)
+
+    result = session.execute(
+        query, {"group_id": group_id, "min_aliases": min_aliases}
+    ).fetchall()
+
+    users = []
+    for row in result:
+        users.append({
+            "user_id": row.user_id,
+            "current_name": row.current_name,
+            "alias_count": row.alias_count,
+            "total_messages": row.total_messages,
+        })
+
+    return users

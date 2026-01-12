@@ -461,3 +461,100 @@ def search(
                     f"[dim]Showing first {limit} results. "
                     "Use --limit to see more.[/dim]"
                 )
+
+
+@cli.command()
+@click.argument("group_identifier")
+@click.option("--user", required=True, help="Username to search for")
+@click.pass_context
+def aliases(ctx: click.Context, group_identifier: str, user: str) -> None:
+    """Show all names (aliases) a user has used.
+
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
+
+    Examples:
+        groupme-backup aliases 1 --user "Calm"
+        groupme-backup aliases 1 --user "Chuck"
+    """
+    group_id = parse_group_identifier(group_identifier)
+
+    with get_session() as session:
+        result = queries.get_user_aliases(session, group_id, user)
+
+        if "error" in result:
+            console.print(f"[red]Error:[/red] {result['error']}")
+            return
+
+        console.print(f"\n[bold]{result['current_name']}[/bold]")
+        console.print(f"User ID: [dim]{result['user_id']}[/dim]")
+        console.print(f"Total aliases: [cyan]{result['total_aliases']}[/cyan]\n")
+
+        table = Table(title=f"All Names Used ({result['total_aliases']} total)")
+        table.add_column("#", style="dim", justify="right", width=4)
+        table.add_column("Name", style="green")
+        table.add_column("Messages", style="cyan", justify="right")
+        table.add_column("First Used", style="dim")
+        table.add_column("Last Used", style="dim")
+
+        for i, alias in enumerate(result["aliases"], 1):
+            # Highlight current name
+            name_style = "bold green" if alias["name"] == result["current_name"] else "white"
+            name = f"[{name_style}]{alias['name']}[/{name_style}]"
+            if alias["name"] == result["current_name"]:
+                name += " [cyan](current)[/cyan]"
+
+            table.add_row(
+                str(i),
+                name,
+                f"{alias['message_count']:,}",
+                alias["first_used"].strftime("%Y-%m-%d"),
+                alias["last_used"].strftime("%Y-%m-%d"),
+            )
+
+        console.print(table)
+        console.print()
+
+
+@cli.command("all-aliases")
+@click.argument("group_identifier")
+@click.option("--min", "min_aliases", default=2, help="Minimum number of aliases")
+@click.option("--limit", default=20, help="Number of users to show")
+@click.pass_context
+def all_aliases(ctx: click.Context, group_identifier: str, min_aliases: int, limit: int) -> None:
+    """Show all users with multiple names (aliases).
+
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
+
+    Examples:
+        groupme-backup all-aliases 1
+        groupme-backup all-aliases 1 --min 5
+    """
+    group_id = parse_group_identifier(group_identifier)
+
+    with get_session() as session:
+        results = queries.get_all_users_with_aliases(session, group_id, min_aliases)
+
+        if not results:
+            console.print(f"[yellow]No users found with {min_aliases}+ aliases[/yellow]")
+            return
+
+        # Limit results
+        results = results[:limit]
+
+        table = Table(title=f"Users with Multiple Names ({len(results)} shown)")
+        table.add_column("Rank", style="cyan", justify="right")
+        table.add_column("Current Name", style="green")
+        table.add_column("Aliases", style="magenta", justify="right")
+        table.add_column("Messages", style="dim", justify="right")
+
+        for i, user in enumerate(results, 1):
+            table.add_row(
+                str(i),
+                user["current_name"][:40],
+                str(user["alias_count"]),
+                f"{user['total_messages']:,}",
+            )
+
+        console.print(table)
+        console.print(f"\n[dim]Use 'groupme-backup aliases {group_identifier} --user <name>' to see details[/dim]")
+        console.print()
