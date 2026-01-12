@@ -297,6 +297,7 @@ def response_time(ctx: click.Context, group_identifier: str) -> None:
 @click.option("--exact", is_flag=True, help="Exact phrase match")
 @click.option("--limit", default=50, help="Maximum results to show")
 @click.option("--with-context", is_flag=True, help="Show 3 messages before/after each result")
+@click.option("--show-likers", is_flag=True, help="Show who liked each message")
 @click.pass_context
 def search(
     ctx: click.Context,
@@ -310,6 +311,7 @@ def search(
     exact: bool,
     limit: int,
     with_context: bool,
+    show_likers: bool,
 ) -> None:
     """Search messages with flexible filtering.
 
@@ -415,6 +417,19 @@ def search(
                 if msg['like_count'] > 0:
                     lines.append(f"[magenta]❤ {msg['like_count']} likes[/magenta]")
 
+                    # Show who liked if requested
+                    if show_likers:
+                        from ..db.models import Message, MessageFavorite, User
+                        message_obj = session.query(Message).filter(Message.id == msg["message_id"]).first()
+                        if message_obj and message_obj.favorites:
+                            liker_names = []
+                            for fav in message_obj.favorites:
+                                user = session.query(User).filter(User.id == fav.user_id).first()
+                                if user:
+                                    liker_names.append(user.name)
+                            if liker_names:
+                                lines.append(f"[dim]Liked by: {', '.join(liker_names[:10])}[/dim]")
+
                 # After messages (dimmed)
                 if context.get("after"):
                     for after_msg in context["after"]:
@@ -433,34 +448,72 @@ def search(
 
         else:
             # Show table view
-            table = Table(title=title)
-            table.add_column("#", style="cyan", justify="right", width=4)
-            table.add_column("Date", style="dim", width=16)
-            table.add_column("Sender", style="green", width=20)
-            table.add_column("Message", style="white")
-            table.add_column("Likes", style="magenta", justify="right", width=6)
+            if show_likers:
+                # Show detailed view with likers
+                from ..db.models import Message, MessageFavorite, User
 
-            for i, msg in enumerate(results, 1):
-                text_preview = msg["text"][:80]
-                if len(msg["text"]) > 80:
-                    text_preview += "..."
+                for i, msg in enumerate(results, 1):
+                    console.print(f"\n[cyan]#{i}[/cyan] {msg['created_at'].strftime('%Y-%m-%d %H:%M')} - [green]{msg['sender_name']}[/green]")
 
-                table.add_row(
-                    str(i),
-                    msg["created_at"].strftime("%Y-%m-%d %H:%M"),
-                    msg["sender_name"][:20],
-                    text_preview,
-                    str(msg["like_count"]),
-                )
+                    text_preview = msg["text"][:120]
+                    if len(msg["text"]) > 120:
+                        text_preview += "..."
+                    console.print(f"  {text_preview}")
 
-            console.print(table)
-            console.print()
+                    if msg['like_count'] > 0:
+                        console.print(f"  [magenta]❤ {msg['like_count']} likes[/magenta]", end="")
 
-            if len(results) == limit:
-                console.print(
-                    f"[dim]Showing first {limit} results. "
-                    "Use --limit to see more.[/dim]"
-                )
+                        # Get who liked it
+                        message_obj = session.query(Message).filter(Message.id == msg["message_id"]).first()
+                        if message_obj and message_obj.favorites:
+                            liker_names = []
+                            for fav in message_obj.favorites:
+                                user = session.query(User).filter(User.id == fav.user_id).first()
+                                if user:
+                                    liker_names.append(user.name)
+                            if liker_names:
+                                console.print(f" - [dim]{', '.join(liker_names[:15])}[/dim]")
+                            else:
+                                console.print()
+                        else:
+                            console.print()
+                    console.print()
+
+                if len(results) == limit:
+                    console.print(
+                        f"[dim]Showing first {limit} results. "
+                        "Use --limit to see more.[/dim]"
+                    )
+            else:
+                # Show compact table view
+                table = Table(title=title)
+                table.add_column("#", style="cyan", justify="right", width=4)
+                table.add_column("Date", style="dim", width=16)
+                table.add_column("Sender", style="green", width=20)
+                table.add_column("Message", style="white")
+                table.add_column("Likes", style="magenta", justify="right", width=6)
+
+                for i, msg in enumerate(results, 1):
+                    text_preview = msg["text"][:80]
+                    if len(msg["text"]) > 80:
+                        text_preview += "..."
+
+                    table.add_row(
+                        str(i),
+                        msg["created_at"].strftime("%Y-%m-%d %H:%M"),
+                        msg["sender_name"][:20],
+                        text_preview,
+                        str(msg["like_count"]),
+                    )
+
+                console.print(table)
+                console.print()
+
+                if len(results) == limit:
+                    console.print(
+                        f"[dim]Showing first {limit} results. "
+                        "Use --limit to see more.[/dim]"
+                    )
 
 
 @cli.command()
