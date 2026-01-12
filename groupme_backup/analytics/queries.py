@@ -6,7 +6,41 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import desc, func, text
 from sqlalchemy.orm import Session
 
-from ..db.models import Group, Message, MessageFavorite, User
+from ..db.models import Attachment, Group, Message, MessageFavorite, User
+
+
+def format_message_with_attachments(text: Optional[str], attachments: List[Attachment]) -> str:
+    """
+    Format message text with attachment indicators.
+
+    Args:
+        text: Message text (can be None)
+        attachments: List of Attachment objects
+
+    Returns:
+        Formatted text with emoji indicators for attachments
+    """
+    # Get attachment types
+    attachment_types = [att.type for att in attachments]
+
+    # Build indicator string
+    indicators = []
+    if "image" in attachment_types or "linked_image" in attachment_types:
+        indicators.append("🖼️")
+    if "video" in attachment_types:
+        indicators.append("📼")
+    if "location" in attachment_types:
+        indicators.append("📍")
+    if "poll" in attachment_types:
+        indicators.append("📊")
+    if "event" in attachment_types:
+        indicators.append("📅")
+
+    # Format the message
+    base_text = text or "(no text)"
+    if indicators:
+        return f"{' '.join(indicators)} {base_text}"
+    return base_text
 
 
 def get_most_popular_messages(
@@ -26,12 +60,10 @@ def get_most_popular_messages(
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    query = (
+    # First get message IDs with like counts
+    subquery = (
         session.query(
             Message.id,
-            Message.text,
-            Message.name.label("sender_name"),
-            Message.created_at,
             func.count(MessageFavorite.user_id).label("like_count"),
         )
         .outerjoin(MessageFavorite, Message.id == MessageFavorite.message_id)
@@ -41,17 +73,31 @@ def get_most_popular_messages(
         .group_by(Message.id)
         .order_by(desc("like_count"))
         .limit(limit)
+        .subquery()
+    )
+
+    # Then fetch full message objects with attachments
+    messages = (
+        session.query(Message)
+        .join(subquery, Message.id == subquery.c.id)
+        .order_by(desc(subquery.c.like_count))
+        .all()
     )
 
     results = []
-    for row in query.all():
+    for msg in messages:
+        like_count = (
+            session.query(func.count(MessageFavorite.user_id))
+            .filter(MessageFavorite.message_id == msg.id)
+            .scalar()
+        )
         results.append(
             {
-                "message_id": row.id,
-                "text": row.text or "(no text)",
-                "sender_name": row.sender_name or "Unknown",
-                "created_at": row.created_at,
-                "like_count": row.like_count,
+                "message_id": msg.id,
+                "text": format_message_with_attachments(msg.text, msg.attachments),
+                "sender_name": msg.name or "Unknown",
+                "created_at": msg.created_at,
+                "like_count": like_count,
             }
         )
 
@@ -1153,21 +1199,36 @@ def search_messages(
             )
         )
 
-    query = (
+    # Get message IDs first
+    subquery = (
         query.group_by(Message.id)
         .order_by(desc(Message.created_at))
         .limit(limit)
+        .subquery()
+    )
+
+    # Fetch full Message objects with attachments
+    messages = (
+        session.query(Message)
+        .join(subquery, Message.id == subquery.c.id)
+        .order_by(desc(Message.created_at))
+        .all()
     )
 
     results = []
-    for row in query.all():
+    for msg in messages:
+        like_count = (
+            session.query(func.count(MessageFavorite.user_id))
+            .filter(MessageFavorite.message_id == msg.id)
+            .scalar()
+        )
         results.append({
-            "message_id": row.id,
-            "text": row.text or "(no text)",
-            "sender_name": row.name or "Unknown",
-            "user_id": row.user_id,
-            "created_at": row.created_at,
-            "like_count": row.like_count,
+            "message_id": msg.id,
+            "text": format_message_with_attachments(msg.text, msg.attachments),
+            "sender_name": msg.name or "Unknown",
+            "user_id": msg.user_id,
+            "created_at": msg.created_at,
+            "like_count": like_count,
         })
 
     return results
@@ -1226,7 +1287,7 @@ def get_message_context(
     def format_message(msg):
         return {
             "message_id": msg.id,
-            "text": msg.text or "(no text)",
+            "text": format_message_with_attachments(msg.text, msg.attachments),
             "sender_name": msg.name or "Unknown",
             "created_at": msg.created_at,
         }
