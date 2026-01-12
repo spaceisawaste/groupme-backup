@@ -692,24 +692,25 @@ def get_message_length_stats(
 ) -> List[Dict[str, Any]]:
     """Get average message length by user."""
     sql = text("""
-    SELECT 
-        user_id,
-        name,
+    SELECT
+        m.user_id,
+        u.name,
         COUNT(*) AS message_count,
-        ROUND(AVG(LENGTH(text))) AS avg_length,
-        MAX(LENGTH(text)) AS max_length,
-        MIN(LENGTH(text)) AS min_length
-    FROM messages
-    WHERE group_id = :group_id 
-      AND system = FALSE 
-      AND text IS NOT NULL
-      AND text != ''
-    GROUP BY user_id, name
+        ROUND(AVG(LENGTH(m.text))) AS avg_length,
+        MAX(LENGTH(m.text)) AS max_length,
+        MIN(LENGTH(m.text)) AS min_length
+    FROM messages m
+    JOIN users u ON m.user_id = u.id
+    WHERE m.group_id = :group_id
+      AND m.system = FALSE
+      AND m.text IS NOT NULL
+      AND m.text != ''
+    GROUP BY m.user_id, u.name
     HAVING COUNT(*) >= 10
     ORDER BY avg_length DESC
     LIMIT :limit;
     """)
-    
+
     results = []
     for row in session.execute(sql, {"group_id": group_id, "limit": limit}):
         results.append({
@@ -720,7 +721,7 @@ def get_message_length_stats(
             "max_length": row[4],
             "min_length": row[5],
         })
-    
+
     return results
 
 
