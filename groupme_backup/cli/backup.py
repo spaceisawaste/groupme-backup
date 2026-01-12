@@ -19,8 +19,9 @@ console = Console()
 @cli.command()
 @click.option("--group-id", help="Specific group ID to backup")
 @click.option("--all", "backup_all", is_flag=True, help="Backup all groups")
+@click.option("--fast-mode", is_flag=True, help="Enable fast mode (3-5x faster, larger batches, less safe)")
 @click.pass_context
-def backup(ctx: click.Context, group_id: str | None, backup_all: bool) -> None:
+def backup(ctx: click.Context, group_id: str | None, backup_all: bool, fast_mode: bool) -> None:
     """Backup GroupMe messages to database.
 
     Use --group-id to backup a specific group, or --all to backup all groups.
@@ -40,7 +41,10 @@ def backup(ctx: click.Context, group_id: str | None, backup_all: bool) -> None:
     )
 
     with get_session() as session:
-        sync_engine = SyncEngine(api_client, session)
+        sync_engine = SyncEngine(api_client, session, fast_mode=fast_mode)
+
+        if fast_mode:
+            console.print("[yellow]⚡ Fast mode enabled: larger batches, safety checks disabled[/yellow]\n")
 
         if backup_all:
             console.print("[bold blue]Fetching all groups...[/bold blue]")

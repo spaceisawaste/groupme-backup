@@ -25,17 +25,19 @@ class SyncEngine:
     Main sync orchestration engine with error handling and logging.
     """
 
-    def __init__(self, api_client: GroupMeClient, db_session: Session):
+    def __init__(self, api_client: GroupMeClient, db_session: Session, fast_mode: bool = False):
         """
         Initialize the sync engine.
 
         Args:
             api_client: GroupMe API client instance
             db_session: Database session
+            fast_mode: Enable fast mode for large backups (3-5x faster, less safe)
         """
         self.api = api_client
         self.db = db_session
-        self.incremental_engine = IncrementalSyncEngine(api_client, db_session)
+        self.fast_mode = fast_mode
+        self.incremental_engine = IncrementalSyncEngine(api_client, db_session, fast_mode)
 
     def sync_group_with_retry(
         self, group_id: str, max_retries: int = 3

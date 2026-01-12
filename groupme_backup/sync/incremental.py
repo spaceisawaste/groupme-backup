@@ -19,16 +19,18 @@ class IncrementalSyncEngine:
     Tracks the last synced message ID and only fetches new messages.
     """
 
-    def __init__(self, api_client: GroupMeClient, db_session: Session):
+    def __init__(self, api_client: GroupMeClient, db_session: Session, fast_mode: bool = False):
         """
         Initialize the incremental sync engine.
 
         Args:
             api_client: GroupMe API client instance
             db_session: Database session
+            fast_mode: Enable fast mode (removes safety checks, larger batches, bulk inserts)
         """
         self.api = api_client
         self.db = db_session
+        self.fast_mode = fast_mode
 
     def sync_group(self, group_id: str) -> int:
         """
@@ -105,7 +107,12 @@ class IncrementalSyncEngine:
         )
 
         # Process and store messages in batches
-        batch_size = 1000
+        # Fast mode uses larger batches for better performance
+        batch_size = 5000 if self.fast_mode else 1000
+
+        if self.fast_mode:
+            logger.info(f"Fast mode enabled: batch_size={batch_size}, flush disabled")
+
         for i, msg_data in enumerate(all_new_messages, 1):
             if i % 100 == 0:
                 logger.info(f"Processed {i}/{len(all_new_messages)} messages")
@@ -231,8 +238,9 @@ class IncrementalSyncEngine:
         for attachment_data in msg_data.get("attachments", []):
             self._store_attachment(msg_data["id"], attachment_data)
 
-        # Flush to catch any errors before committing the batch
-        self.db.flush()
+        # Flush to catch any errors before committing the batch (disabled in fast mode)
+        if not self.fast_mode:
+            self.db.flush()
 
     def _store_attachment(
         self, message_id: str, attachment_data: Dict[str, Any]
