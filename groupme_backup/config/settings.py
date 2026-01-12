@@ -52,14 +52,16 @@ class Settings(BaseSettings):
 
     @field_validator("backup_group_ids", mode="before")
     @classmethod
-    def parse_group_ids(cls, v: Optional[str | List[str]]) -> List[str]:
+    def parse_group_ids(cls, v: Optional[str | int | List[str]]) -> List[str]:
         """Parse comma-separated group IDs from environment variable."""
         if not v:
             return []
         if isinstance(v, list):
             return v
-        if isinstance(v, str):
-            return [gid.strip() for gid in v.split(",") if gid.strip()]
+        if isinstance(v, (str, int)):
+            # Convert to string first if it's an integer
+            v_str = str(v)
+            return [gid.strip() for gid in v_str.split(",") if gid.strip()]
         return []
 
     @property

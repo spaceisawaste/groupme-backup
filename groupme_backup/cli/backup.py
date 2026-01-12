@@ -54,7 +54,14 @@ def backup(ctx: click.Context, group_id: str | None, backup_all: bool) -> None:
                 groups = api_client.get_all_groups()
                 progress.update(task, completed=True)
 
-            console.print(f"\nFound [bold]{len(groups)}[/bold] groups")
+            # Filter by backup_group_ids if configured
+            if settings.backup_group_ids:
+                groups = [g for g in groups if g["id"] in settings.backup_group_ids]
+                console.print(
+                    f"\n[yellow]Filtered to {len(groups)} configured group(s)[/yellow]"
+                )
+
+            console.print(f"\nFound [bold]{len(groups)}[/bold] groups to backup")
 
             # Show table of groups
             table = Table(title="Groups to Backup")
