@@ -104,23 +104,32 @@ class IncrementalSyncEngine:
             f"in chronological order (oldest to newest)"
         )
 
-        # Process and store messages
+        # Process and store messages in batches
+        batch_size = 1000
         for i, msg_data in enumerate(all_new_messages, 1):
             if i % 100 == 0:
                 logger.info(f"Processed {i}/{len(all_new_messages)} messages")
+
             self._store_message(msg_data, group_id)
             new_messages_count += 1
 
-        # Update last synced message ID (newest message)
-        newest_message_id = all_new_messages[-1]["id"]
-        group.last_synced_message_id = newest_message_id
-        group.last_synced_at = datetime.now(timezone.utc)
+            # Commit in batches to handle interruptions gracefully
+            if i % batch_size == 0 or i == len(all_new_messages):
+                # Update last synced message ID to this batch
+                current_message_id = msg_data["id"]
+                group.last_synced_message_id = current_message_id
+                group.last_synced_at = datetime.now(timezone.utc)
 
-        self.db.commit()
+                self.db.commit()
+                logger.info(
+                    f"Committed batch: {i}/{len(all_new_messages)} messages "
+                    f"(last_synced_message_id={current_message_id})"
+                )
+
         logger.info(
             f"Completed sync for group {group_id}. "
             f"Fetched {new_messages_count} new messages. "
-            f"Last message ID: {newest_message_id}"
+            f"Last message ID: {group.last_synced_message_id}"
         )
 
         return new_messages_count
