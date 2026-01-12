@@ -9,11 +9,11 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 setup(
     name="groupme-backup",
     version="0.1.0",
-    author="Your Name",
+    author="Conor Nailos",
     description="A CLI tool to backup GroupMe group chats with analytics capabilities",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/groupme-backup",
+    url="https://github.com/spaceisawaste/groupme-backup",
     packages=find_packages(exclude=["tests", "tests.*"]),
     classifiers=[
         "Development Status :: 3 - Alpha",

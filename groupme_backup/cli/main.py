@@ -52,7 +52,7 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 def version() -> None:
     """Show version information."""
     console.print("[bold]GroupMe Backup Tool[/bold] version 0.1.0")
-    console.print("https://github.com/yourusername/groupme-backup")
+    console.print("https://github.com/spaceisawaste/groupme-backup")
 
 
 # Import command modules to register them with the CLI
