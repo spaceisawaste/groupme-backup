@@ -1,8 +1,11 @@
 """Analytics CLI commands."""
 
+from datetime import datetime, timezone
+
 import click
 from rich.console import Console
 from rich.table import Table
+from rich.panel import Panel
 
 from ..analytics import queries
 from ..db.session import get_session
@@ -281,3 +284,180 @@ def response_time(ctx: click.Context, group_identifier: str) -> None:
 
         console.print(table)
         console.print()
+
+
+@cli.command()
+@click.argument("group_identifier")
+@click.argument("text", required=False)
+@click.option("--user", help="Filter by username")
+@click.option("--liked-by", help="Filter by who liked the message")
+@click.option("--after", help="Messages after date (YYYY-MM-DD)")
+@click.option("--before", help="Messages before date (YYYY-MM-DD)")
+@click.option("--case-sensitive", is_flag=True, help="Case-sensitive text search")
+@click.option("--exact", is_flag=True, help="Exact phrase match")
+@click.option("--limit", default=50, help="Maximum results to show")
+@click.option("--with-context", is_flag=True, help="Show 3 messages before/after each result")
+@click.pass_context
+def search(
+    ctx: click.Context,
+    group_identifier: str,
+    text: str,
+    user: str,
+    liked_by: str,
+    after: str,
+    before: str,
+    case_sensitive: bool,
+    exact: bool,
+    limit: int,
+    with_context: bool,
+) -> None:
+    """Search messages with flexible filtering.
+
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
+    TEXT is an optional search term (case-insensitive by default).
+
+    Examples:
+        groupme-backup search 1 "pizza party"
+        groupme-backup search 1 --user "John"
+        groupme-backup search 1 "pizza" --user "John"
+        groupme-backup search 1 --after 2024-01-01 --before 2024-12-31
+        groupme-backup search 1 --liked-by "Sarah"
+        groupme-backup search 1 "urgent" --case-sensitive --exact
+        groupme-backup search 1 "meeting" --with-context
+    """
+    group_id = parse_group_identifier(group_identifier)
+
+    # Parse dates
+    after_date = None
+    before_date = None
+    if after:
+        try:
+            after_date = datetime.strptime(after, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            console.print(f"[red]Invalid date format for --after: {after}[/red]")
+            console.print("Use format: YYYY-MM-DD (e.g., 2024-01-01)")
+            raise click.Abort()
+
+    if before:
+        try:
+            before_date = datetime.strptime(before, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            console.print(f"[red]Invalid date format for --before: {before}[/red]")
+            console.print("Use format: YYYY-MM-DD (e.g., 2024-12-31)")
+            raise click.Abort()
+
+    # Validate at least one search criterion
+    if not any([text, user, liked_by, after_date, before_date]):
+        console.print("[red]Error:[/red] Please provide at least one search criterion")
+        console.print("  - Search text (positional argument)")
+        console.print("  - --user username")
+        console.print("  - --liked-by username")
+        console.print("  - --after date")
+        console.print("  - --before date")
+        raise click.Abort()
+
+    with get_session() as session:
+        results = queries.search_messages(
+            session=session,
+            group_id=group_id,
+            text=text,
+            user=user,
+            liked_by=liked_by,
+            after=after_date,
+            before=before_date,
+            case_sensitive=case_sensitive,
+            exact=exact,
+            limit=limit,
+        )
+
+        if not results:
+            console.print("[yellow]No messages found matching your criteria[/yellow]")
+            return
+
+        # Build title with filters
+        title_parts = []
+        if text:
+            title_parts.append(f'"{text}"')
+        if user:
+            title_parts.append(f"by {user}")
+        if liked_by:
+            title_parts.append(f"liked by {liked_by}")
+        if after_date:
+            title_parts.append(f"after {after}")
+        if before_date:
+            title_parts.append(f"before {before}")
+
+        title = f"Search Results: {' '.join(title_parts)} ({len(results)} found)"
+        console.print(f"\n[bold]{title}[/bold]\n")
+
+        # Display results
+        if with_context:
+            # Show detailed view with context
+            for i, msg in enumerate(results, 1):
+                context = queries.get_message_context(session, group_id, msg["message_id"])
+
+                # Build context display
+                lines = []
+
+                # Before messages (dimmed)
+                if context.get("before"):
+                    for before_msg in context["before"]:
+                        lines.append(
+                            f"[dim]{before_msg['created_at'].strftime('%Y-%m-%d %H:%M')} "
+                            f"{before_msg['sender_name']}: {before_msg['text'][:80]}[/dim]"
+                        )
+
+                # Target message (highlighted)
+                lines.append(
+                    f"[bold green]{msg['created_at'].strftime('%Y-%m-%d %H:%M')} "
+                    f"{msg['sender_name']}[/bold green]: [white]{msg['text'][:200]}[/white]"
+                )
+                if msg['like_count'] > 0:
+                    lines.append(f"[magenta]❤ {msg['like_count']} likes[/magenta]")
+
+                # After messages (dimmed)
+                if context.get("after"):
+                    for after_msg in context["after"]:
+                        lines.append(
+                            f"[dim]{after_msg['created_at'].strftime('%Y-%m-%d %H:%M')} "
+                            f"{after_msg['sender_name']}: {after_msg['text'][:80]}[/dim]"
+                        )
+
+                panel = Panel(
+                    "\n".join(lines),
+                    title=f"Result {i}/{len(results)}",
+                    border_style="blue",
+                )
+                console.print(panel)
+                console.print()
+
+        else:
+            # Show table view
+            table = Table(title=title)
+            table.add_column("#", style="cyan", justify="right", width=4)
+            table.add_column("Date", style="dim", width=16)
+            table.add_column("Sender", style="green", width=20)
+            table.add_column("Message", style="white")
+            table.add_column("Likes", style="magenta", justify="right", width=6)
+
+            for i, msg in enumerate(results, 1):
+                text_preview = msg["text"][:80]
+                if len(msg["text"]) > 80:
+                    text_preview += "..."
+
+                table.add_row(
+                    str(i),
+                    msg["created_at"].strftime("%Y-%m-%d %H:%M"),
+                    msg["sender_name"][:20],
+                    text_preview,
+                    str(msg["like_count"]),
+                )
+
+            console.print(table)
+            console.print()
+
+            if len(results) == limit:
+                console.print(
+                    f"[dim]Showing first {limit} results. "
+                    "Use --limit to see more.[/dim]"
+                )

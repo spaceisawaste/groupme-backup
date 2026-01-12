@@ -1,7 +1,7 @@
 """Analytics query functions for GroupMe data."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, func, text
 from sqlalchemy.orm import Session
@@ -1061,5 +1061,178 @@ def get_controversial_messages(
             "reply_count": row[5],
             "controversy_score": row[6],
         })
-    
+
     return results
+
+
+# ============================================================================
+# SEARCH FUNCTIONS
+# ============================================================================
+
+def search_messages(
+    session: Session,
+    group_id: str,
+    text: Optional[str] = None,
+    user: Optional[str] = None,
+    liked_by: Optional[str] = None,
+    after: Optional[datetime] = None,
+    before: Optional[datetime] = None,
+    case_sensitive: bool = False,
+    exact: bool = False,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """
+    Search messages with flexible filtering.
+
+    Args:
+        session: Database session
+        group_id: Group ID to search in
+        text: Text to search for (optional)
+        user: Username to filter by (optional)
+        liked_by: Username who liked the message (optional)
+        after: Only messages after this date (optional)
+        before: Only messages before this date (optional)
+        case_sensitive: Whether text search is case-sensitive
+        exact: Whether to match exact phrase vs substring
+        limit: Maximum number of results
+
+    Returns:
+        List of matching messages with metadata
+    """
+    query = (
+        session.query(
+            Message.id,
+            Message.text,
+            Message.name,
+            Message.user_id,
+            Message.created_at,
+            func.count(MessageFavorite.user_id).label("like_count"),
+        )
+        .outerjoin(MessageFavorite, Message.id == MessageFavorite.message_id)
+        .filter(Message.group_id == group_id)
+        .filter(Message.system == False)
+    )
+
+    # Text search
+    if text:
+        if exact:
+            if case_sensitive:
+                query = query.filter(Message.text == text)
+            else:
+                query = query.filter(func.lower(Message.text) == func.lower(text))
+        else:
+            if case_sensitive:
+                query = query.filter(Message.text.contains(text))
+            else:
+                query = query.filter(Message.text.ilike(f"%{text}%"))
+
+    # User filter
+    if user:
+        query = query.filter(Message.name.ilike(f"%{user}%"))
+
+    # Date filters
+    if after:
+        query = query.filter(Message.created_at >= after)
+    if before:
+        query = query.filter(Message.created_at <= before)
+
+    # Liked by filter
+    if liked_by:
+        # Subquery to find user IDs matching the name
+        liked_by_user_ids = (
+            session.query(User.id)
+            .filter(User.name.ilike(f"%{liked_by}%"))
+            .subquery()
+        )
+
+        # Filter messages liked by those users
+        query = query.filter(
+            Message.id.in_(
+                session.query(MessageFavorite.message_id)
+                .filter(MessageFavorite.user_id.in_(liked_by_user_ids))
+            )
+        )
+
+    query = (
+        query.group_by(Message.id)
+        .order_by(desc(Message.created_at))
+        .limit(limit)
+    )
+
+    results = []
+    for row in query.all():
+        results.append({
+            "message_id": row.id,
+            "text": row.text or "(no text)",
+            "sender_name": row.name or "Unknown",
+            "user_id": row.user_id,
+            "created_at": row.created_at,
+            "like_count": row.like_count,
+        })
+
+    return results
+
+
+def get_message_context(
+    session: Session,
+    group_id: str,
+    message_id: str,
+    before_count: int = 3,
+    after_count: int = 3,
+) -> Dict[str, Any]:
+    """
+    Get messages before and after a specific message for context.
+
+    Args:
+        session: Database session
+        group_id: Group ID
+        message_id: The message ID to get context for
+        before_count: Number of messages before
+        after_count: Number of messages after
+
+    Returns:
+        Dictionary with before, target, and after messages
+    """
+    # Get the target message
+    target = session.query(Message).filter(
+        Message.id == message_id,
+        Message.group_id == group_id
+    ).first()
+
+    if not target:
+        return {"error": "Message not found"}
+
+    # Get messages before
+    before_messages = (
+        session.query(Message)
+        .filter(Message.group_id == group_id)
+        .filter(Message.created_at < target.created_at)
+        .order_by(desc(Message.created_at))
+        .limit(before_count)
+        .all()
+    )
+    before_messages.reverse()  # Chronological order
+
+    # Get messages after
+    after_messages = (
+        session.query(Message)
+        .filter(Message.group_id == group_id)
+        .filter(Message.created_at > target.created_at)
+        .order_by(Message.created_at)
+        .limit(after_count)
+        .all()
+    )
+
+    def format_message(msg):
+        return {
+            "message_id": msg.id,
+            "text": msg.text or "(no text)",
+            "sender_name": msg.name or "Unknown",
+            "created_at": msg.created_at,
+        }
+
+    return {
+        "before": [format_message(msg) for msg in before_messages],
+        "target": format_message(target),
+        "after": [format_message(msg) for msg in after_messages],
+    }
