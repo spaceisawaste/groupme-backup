@@ -11,35 +11,48 @@ from ..db.models import Attachment, Group, Message, MessageFavorite, User
 
 def format_message_with_attachments(text: Optional[str], attachments: List[Attachment]) -> str:
     """
-    Format message text with attachment indicators.
+    Format message text with attachment indicators and URLs.
 
     Args:
         text: Message text (can be None)
         attachments: List of Attachment objects
 
     Returns:
-        Formatted text with emoji indicators for attachments
+        Formatted text with emoji indicators and attachment URLs
     """
-    # Get attachment types
-    attachment_types = [att.type for att in attachments]
-
-    # Build indicator string
+    # Build indicator string and collect URLs
     indicators = []
-    if "image" in attachment_types or "linked_image" in attachment_types:
-        indicators.append("🖼️")
-    if "video" in attachment_types:
-        indicators.append("📼")
-    if "location" in attachment_types:
-        indicators.append("📍")
-    if "poll" in attachment_types:
-        indicators.append("📊")
-    if "event" in attachment_types:
-        indicators.append("📅")
+    urls = []
+
+    for att in attachments:
+        if att.type in ("image", "linked_image"):
+            indicators.append("🖼️")
+            if att.url:
+                urls.append(att.url)
+        elif att.type == "video":
+            indicators.append("📼")
+            if att.url:
+                urls.append(att.url)
+        elif att.type == "location":
+            indicators.append("📍")
+        elif att.type == "poll":
+            indicators.append("📊")
+        elif att.type == "event":
+            indicators.append("📅")
 
     # Format the message
-    base_text = text or "(no text)"
+    if not text and urls:
+        # No text but has media URLs - show the URLs
+        base_text = " ".join(urls)
+    elif not text:
+        # No text and no URLs
+        base_text = "(no text)"
+    else:
+        # Has text
+        base_text = text
+
     if indicators:
-        return f"{' '.join(indicators)} {base_text}"
+        return f"{' '.join(set(indicators))} {base_text}"
     return base_text
 
 
