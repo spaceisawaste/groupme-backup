@@ -58,6 +58,7 @@ def version() -> None:
 # Import command modules to register them with the CLI
 from . import analytics  # noqa: F401, E402
 from . import backup  # noqa: F401, E402
+from . import groups  # noqa: F401, E402
 
 
 if __name__ == "__main__":

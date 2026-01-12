@@ -11,18 +11,45 @@ from .main import cli
 console = Console()
 
 
+def parse_group_identifier(identifier: str) -> str:
+    """
+    Parse group identifier - can be a numeric index or group ID.
+
+    Returns the group ID.
+    """
+    from ..utils.groups_cache import get_group_id_by_index
+
+    # Try to parse as integer (numeric index)
+    try:
+        index = int(identifier)
+        group_id = get_group_id_by_index(index)
+        if group_id:
+            return group_id
+        else:
+            console.print(f"[red]Error:[/red] No group at index {index}")
+            console.print("Run [cyan]groupme-backup groups[/cyan] to see available groups")
+            raise click.Abort()
+    except ValueError:
+        # Not a number, assume it's a group ID
+        return identifier
+
+
 @cli.command()
-@click.argument("group_id")
+@click.argument("group_identifier")
 @click.option("--days", default=7, help="Number of days to analyze")
 @click.option("--limit", default=10, help="Number of results to show")
 @click.pass_context
-def popular(ctx: click.Context, group_id: str, days: int, limit: int) -> None:
+def popular(ctx: click.Context, group_identifier: str, days: int, limit: int) -> None:
     """Show most popular messages by likes.
 
-    GROUP_ID is the ID of the group to analyze.
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
 
-    Example: groupme-backup popular 12345678 --days 7
+    Examples:
+        groupme-backup popular 1 --days 7
+        groupme-backup popular 13641782 --days 7
     """
+    group_id = parse_group_identifier(group_identifier)
+
     with get_session() as session:
         results = queries.get_most_popular_messages(session, group_id, days, limit)
 
@@ -56,15 +83,19 @@ def popular(ctx: click.Context, group_id: str, days: int, limit: int) -> None:
 
 
 @cli.command()
-@click.argument("group_id")
+@click.argument("group_identifier")
 @click.pass_context
-def consecutive(ctx: click.Context, group_id: str) -> None:
+def consecutive(ctx: click.Context, group_identifier: str) -> None:
     """Find longest consecutive message streak.
 
-    GROUP_ID is the ID of the group to analyze.
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
 
-    Example: groupme-backup consecutive 12345678
+    Examples:
+        groupme-backup consecutive 1
+        groupme-backup consecutive 13641782
     """
+    group_id = parse_group_identifier(group_identifier)
+
     with get_session() as session:
         result = queries.get_longest_consecutive_streak(session, group_id)
 
@@ -88,17 +119,21 @@ def consecutive(ctx: click.Context, group_id: str) -> None:
 
 
 @cli.command()
-@click.argument("group_id")
+@click.argument("group_identifier")
 @click.option("--days", default=30, help="Number of days to analyze")
 @click.option("--limit", default=10, help="Number of users to show")
 @click.pass_context
-def active(ctx: click.Context, group_id: str, days: int, limit: int) -> None:
+def active(ctx: click.Context, group_identifier: str, days: int, limit: int) -> None:
     """Show most active users by message count.
 
-    GROUP_ID is the ID of the group to analyze.
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
 
-    Example: groupme-backup active 12345678 --days 30
+    Examples:
+        groupme-backup active 1 --days 30
+        groupme-backup active 13641782 --days 30
     """
+    group_id = parse_group_identifier(group_identifier)
+
     with get_session() as session:
         results = queries.get_most_active_users(session, group_id, days, limit)
 
@@ -120,17 +155,21 @@ def active(ctx: click.Context, group_id: str, days: int, limit: int) -> None:
 
 
 @cli.command()
-@click.argument("group_id")
+@click.argument("group_identifier")
 @click.option("--days", default=30, help="Number of days to analyze")
 @click.option("--limit", default=10, help="Number of users to show")
 @click.pass_context
-def liked(ctx: click.Context, group_id: str, days: int, limit: int) -> None:
+def liked(ctx: click.Context, group_identifier: str, days: int, limit: int) -> None:
     """Show most liked users (by total likes received).
 
-    GROUP_ID is the ID of the group to analyze.
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
 
-    Example: groupme-backup liked 12345678 --days 30
+    Examples:
+        groupme-backup liked 1 --days 30
+        groupme-backup liked 13641782 --days 30
     """
+    group_id = parse_group_identifier(group_identifier)
+
     with get_session() as session:
         results = queries.get_most_liked_users(session, group_id, days, limit)
 
@@ -150,15 +189,19 @@ def liked(ctx: click.Context, group_id: str, days: int, limit: int) -> None:
 
 
 @cli.command()
-@click.argument("group_id")
+@click.argument("group_identifier")
 @click.pass_context
-def stats(ctx: click.Context, group_id: str) -> None:
+def stats(ctx: click.Context, group_identifier: str) -> None:
     """Show general statistics for a group.
 
-    GROUP_ID is the ID of the group to analyze.
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
 
-    Example: groupme-backup stats 12345678
+    Examples:
+        groupme-backup stats 1
+        groupme-backup stats 13641782
     """
+    group_id = parse_group_identifier(group_identifier)
+
     with get_session() as session:
         result = queries.get_group_statistics(session, group_id)
 
@@ -200,15 +243,19 @@ def stats(ctx: click.Context, group_id: str) -> None:
 
 
 @cli.command()
-@click.argument("group_id")
+@click.argument("group_identifier")
 @click.pass_context
-def response_time(ctx: click.Context, group_id: str) -> None:
+def response_time(ctx: click.Context, group_identifier: str) -> None:
     """Analyze conversation pace (time between messages).
 
-    GROUP_ID is the ID of the group to analyze.
+    GROUP_IDENTIFIER can be a numeric index (from 'groups' command) or group ID.
 
-    Example: groupme-backup response-time 12345678
+    Examples:
+        groupme-backup response-time 1
+        groupme-backup response-time 13641782
     """
+    group_id = parse_group_identifier(group_identifier)
+
     with get_session() as session:
         result = queries.get_response_time_analysis(session, group_id)
 
